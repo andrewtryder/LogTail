@@ -109,10 +109,6 @@ class Logger(callbacks.Plugin):
         expr = re.compile(restring)
         return filter(expr.search, strlist)
 
-    # INFO 2013-06-10T11:04:11 tail called in private by "spline!spline@percolator.mrcoffee.org".
-    #def tailtracebacks(self, irc, msg, args, optlog):
-    #tailtracebacks = wrap(tailtracebacks, [('somethingWithoutSpaces')])
-
     def logblah(self, irc, msg, args):
         """
         .
