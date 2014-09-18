@@ -7,11 +7,8 @@
 # libs
 import os
 import re
-from collections import deque, defaultdict
-from operator import itemgetter
 # extra supybot libs.
 import supybot.conf as conf
-import supybot.schedule as schedule
 # supybot libs
 import supybot.utils as utils
 from supybot.commands import *
@@ -32,62 +29,6 @@ class Logger(callbacks.Plugin):
     This should describe *how* to use this plugin."""
     threaded = True
 
-
-    def __init__(self, irc):
-        self.__parent = super(Logger, self)
-        self.__parent.__init__(irc)
-        self.logfiles = None
-        self.logdir = None
-
-    def cachelogfiles(self):
-        """This will check if we have individual logfiles and cache
-        the proper filenames."""
-
-        # NOTE, we could also use a list of loaded Plugins -> .log + construct.
-        self.log.info("CacheLogFiles: Running")
-        # make sure we're using individual logfiles.
-        if not conf.supybot.log.plugins.individualLogfiles():
-            self.log.error("ERROR: config log.plugins.individualLogfiles True")
-            self.log.error("Must be set for this plugin to work.")
-            return
-        # next, verify the existance of the logdirectory.
-        pluginlogs = conf.supybot.directories.log()+'/plugins'
-        if not os.path.exists(pluginlogs):
-            self.log.error("ERROR: {0} path does not exist.".format(pluginlogs))
-            return
-        # now that we have the dir, grab the files and parse.
-        # must be a file, match File.regex (ignores Channel.ignore.log). lower + strip.
-        matchinglogs = [f for f in os.listdir(pluginlogs) if os.path.isfile(os.path.join(pluginlogs, f)) and re.match('^\w+.log$', f)]
-        if len(matchinglogs) != 0:  # if not 0, change self.logfiles.
-            self.logfiles = matchinglogs
-            self.logdir = pluginlogs
-        else:
-            self.log.error("ERROR: I did not find any matching Plugin log files in {0}".format(logdir))
-
-    def _tail2(self, logfile, n=1, bs=1024):
-        f = open(logfile)
-        f.seek(-1,2)
-        l = 1-f.read(1).count('\n') # If file doesn't end in \n, count it anyway.
-        B = f.tell()
-        while n >= l and B > 0:
-                block = min(bs, B)
-                B -= block
-                f.seek(B, 0)
-                l += f.read(block).count('\n')
-        f.seek(B, 0)
-        l = min(l,n) # discard first (incomplete) line if l > n
-        lines = f.readlines()[-l:]
-        f.close()
-        return lines
-
-    def _tail(self, filename, n=None):
-        """Return the last n lines of a file."""
-
-        if not n:
-            n = 20
-
-        return deque(open(filename), n)
-
     def _findexceptions(self, filename):
         """Grep through filename and return a list of exceptions."""
 
@@ -103,91 +44,142 @@ class Logger(callbacks.Plugin):
             # now return the list.
             return exceptionlist
 
-    def loggrep(self, restring, strlist):
-        """grep"""
-
-        expr = re.compile(restring)
-        return filter(expr.search, strlist)
-
-    def logblah(self, irc, msg, args):
+    def _grep(self, p, f):
         """
-        .
+        grep-like function
         """
 
-        irc.reply(fffff)
+        r=[]
+        for line in f:
+            if re.search(p, line):
+                r.append(line)
+        return r
 
-    logblah = wrap(logblah)
-
-    def _filecheck(self, optfile):
-
-        logfile = self.logdir + '/' + optfile
-        return logfile
-
-    # http://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
-    # http://stackoverflow.com/questions/3168759/python-parsing-files/3168786#3168786
-
-    def logtail(self, irc, msg, args, optlog):
-        """<logfile>
-
-        Tail's a logfile. 10 lines.
+    def tailf(self, logfile, n):
+        """
+        code via: http://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
         """
 
-        if not self.logfiles and not self.logdir:
-            irc.reply("ERROR: Something broke on logfiles and logdir.")
+        bs = 1024
+        f = open(logfile)
+        f.seek(-1,2)
+        l = 1-f.read(1).count('\n') # If file doesn't end in \n, count it anyway.
+        B = f.tell()
+        while n >= l and B > 0:
+                block = min(bs, B)
+                B -= block
+                f.seek(B, 0)
+                l += f.read(block).count('\n')
+        f.seek(B, 0)
+        l = min(l,n) # discard first (incomplete) line if l > n
+        lines = f.readlines()[-l:]
+        # sed.
+        lines = [i.replace("\n", '') for i in lines]
+        f.close()
+        return lines
+
+
+    def tail(self, irc, msg, args, optlist, optlog):
+        """[--singleline --n=# of lines] <logfile>
+        
+        Tail's the last 10 messages from a logfile. Execute listlogs command for a list of logs available.
+        Ex: main
+        """
+        
+        # first, lower optlog to match.
+        optlog = optlog.lower()
+        
+        # next handle optlist.
+        singleline, lines = False, 10  # defaults.
+        if optlist:
+            for (k, v) in optlist:
+                if k == 'singleline':
+                    singleline = True
+                if k == 'n':
+                    if v > 50:
+                        irc.reply("Sorry, I won't display more than 50 lines.")
+                    elif v < 1:
+                        irc.reply("Sorry, I need a positive integer here.")
+                    else:  # under 50 so lets go.
+                        lines = v
+            
+        
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
             return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # we're here if things worked.
+        # lets display the last 10 lines.
+        lf = self.tailf(ll[optlog], lines)
+        # lets display.
+        if singleline:
+            irc.reply("{0} :: {1}".format(optlog, " ".join([i for i in lf])))
+        else:  # one per line.
+            for l in lf:
+                irc.reply("{0}".format(l))
 
-        if optlog not in self.logfiles:
-            irc.reply("ERROR: '{0}' not in logfiles.".format(optlog))
-            return
-
-        optlog = self._filecheck(optlog)
-
-        filetail = self._tail2(optlog, n=10)
-        for line in filetail:
-            irc.reply(line.strip('\n'))
-
-    logtail = wrap(logtail, [('somethingWithoutSpaces')])
+    tail = wrap(tail, [getopts({'singleline': '', 'n':('int') }), ('somethingWithoutSpaces')])
 
 
-    def tail(self, irc, msg, args, optlog):
+    def _listlogs(self):
         """
-        Log Tail.
-        """
-
-        logs = conf.supybot.directories.log()
-        pluginlogs = logs+'/plugins'
-        matchinglogs = [f for f in os.listdir(pluginlogs) if os.path.isfile(os.path.join(pluginlogs, f)) and re.match('^\w+.log$', f)]
-        if optlog in matchinglogs:
-            fulllog = pluginlogs+'/'+optlog
-            irc.reply("{0}".format(fulllog))
-            extractor = TracebackGrep()
-            for line in file(fulllog):
-                tb = extractor.process(line)
-                if tb:
-                    irc.reply(tb)
-        else:
-            irc.reply("Sorry, I did not find {0}".format(optlog))
-
-    tail = wrap(tail, [('somethingWithoutSpaces')])
-
-
-    def logger(self, irc, msg, args):
-        """
-        Docstring.
+        List the available logs for tailing and display.
         """
 
-        logoption = conf.supybot.log.plugins.individualLogfiles()
-        irc.reply(logoption)
-
+        # container for out.
+        l = {}
+        # Do we have individual log files? (Boolean)
+        ilf = conf.supybot.log.plugins.individualLogfiles()
         # if not os.path.exists
         logs = conf.supybot.directories.log()
-        irc.reply(logs)
-        pluginlogs = logs+'/plugins'
+        if not os.path.exists(logs):
+            self.log.info("_listlogs :: Logs path ({0}) does not exist.".format(logs))
+            return None
+        # does individual logs exist?
+        if ilf:
+            ilflogs = logs+'/plugins'
+            if not os.path.exists(ilflogs):
+                self.log.reply("_listlogs :: ILF path ({0}) does not exist.".format(ilflogs))
+        # now lets find the logs.
+        mlf = logs+'/messages.log'
+        # main log first.
+        if os.path.isfile(mlf):
+            l['main'] = mlf
+        else:
+            self.log.reply("_listlogs :: main log file ({0}) does not exist.".format(mlf))
+            return None
+        # now if we have individual log files, lets add those.
+        if ilf:
+            matchinglogs = [f for f in os.listdir(ilflogs) if os.path.isfile(os.path.join(ilflogs, f)) and re.match('^\w+.log$', f)]
+            # list with matching. lets add these into the l dict. ex: Logger.log
+            for i in matchinglogs:
+                n = i.replace('.log', '').lower()  # remove .log and lower to match.
+                l[n] = ilflogs + '/' + i  # path.
+        # now return.
+        if len(l) == 0:
+            self.log.info("_listlogs :: ERROR no logs found.")
+            return None
+        else:
+            return l
 
-        matchinglogs = [f for f in os.listdir(pluginlogs) if os.path.isfile(os.path.join(pluginlogs, f)) and re.match('^\w+.log$', f)]
-        irc.reply(matchinglogs)
+    def listlogs(self, irc, msg, args):
+        """
+        List log files available.
+        """
+        
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+        else:
+            for (k, v) in ll.items():
+                irc.reply("{0} :: {1}".format(k, v))
 
-    logger = wrap(logger)
+    listlogs = wrap(listlogs)
 
 Class = Logger
 
