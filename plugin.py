@@ -43,19 +43,49 @@ class Logger(callbacks.Plugin):
                 exceptionlist.append(e)
             # now return the list.
             return exceptionlist
-
-    def _grep(self, p, f):
+        
+    def _grep(self, pattern, file_obj, ln=False):
         """
         grep-like function
         """
 
-        r=[]
-        for line in f:
-            if re.search(p, line):
-                r.append(line)
-        return r
+        l = []
+        for i, line in enumerate(open(file_obj).readlines()):
+            if re.match(pattern, line):
+                if ln:
+                    l.append("{0} {1}".format(i+i, line.rstrip()))
+                else:
+                    l.append(line.rstrip())
+        return l
 
-    def tailf(self, logfile, n):
+    def grep(self, irc, msg, args, optlog, optpat):
+        """<log> <pattern>
+        
+        Grep logfile for pattern.
+        """
+        
+        optlog = optlog.lower()
+
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+            return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # now find.
+        g = self._grep(optpat, ll[optlog], ln=False)
+        # we get a list back.
+        if len(g) == 0:  # no matches.
+            irc.reply("Sorry, I found no matches in the {0} logfile for '{1}'".format(optlog, optpat))
+        else:  # matches.
+            irc.reply(g)
+
+    grep = wrap(grep, [('somethingWithoutSpaces'), ('text')])
+
+    def _tailf(self, logfile, n):
         """
         code via: http://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
         """
@@ -115,7 +145,7 @@ class Logger(callbacks.Plugin):
                 return
         # we're here if things worked.
         # lets display the last 10 lines.
-        lf = self.tailf(ll[optlog], lines)
+        lf = self._tailf(ll[optlog], lines)
         # lets display.
         if singleline:
             irc.reply("{0} :: {1}".format(optlog, " ".join([i for i in lf])))
