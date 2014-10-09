@@ -83,7 +83,7 @@ class Logger(callbacks.Plugin):
         else:  # matches.
             irc.reply(g)
 
-    grep = wrap(grep, [('somethingWithoutSpaces'), ('text')])
+    grep = wrap(grep, [('checkCapability', 'owner'), ('somethingWithoutSpaces'), ('text')])
 
     def _tailf(self, logfile, n):
         """
@@ -107,7 +107,6 @@ class Logger(callbacks.Plugin):
         lines = [i.replace("\n", '') for i in lines]
         f.close()
         return lines
-
 
     def tail(self, irc, msg, args, optlist, optlog):
         """[--singleline --n=# of lines] <logfile>
@@ -153,8 +152,7 @@ class Logger(callbacks.Plugin):
             for l in lf:
                 irc.reply("{0}".format(l))
 
-    tail = wrap(tail, [getopts({'singleline': '', 'n':('int') }), ('somethingWithoutSpaces')])
-
+    tail = wrap(tail, [('checkCapability', 'owner'), getopts({'singleline': '', 'n':('int') }), ('somethingWithoutSpaces')])
 
     def _listlogs(self):
         """
@@ -197,19 +195,42 @@ class Logger(callbacks.Plugin):
         else:
             return l
 
-    def listlogs(self, irc, msg, args):
+    def _gS(self, fn):
+        """File size wrapper."""
+
+        st = os.stat(fn)
+        num = st.st_size
+        # pretty.
+        for x in ['b','KB','MB','GB']:
+            if num < 1024.0 and num > -1024.0:
+                return "%3.1f%s" % (num, x)
+            num /= 1024.0
+        return "%3.1f%s" % (num, 'TB')
+
+    def listlogs(self, irc, msg, args, optlist):
         """
         List log files available.
         """
         
+        # setup input args.
+        s = False
+        if optlist:
+            for (k, v) in optlist:
+                if k == "size":
+                    s = True
+        
+        # grab and go.
         ll = self._listlogs()
         if not ll:
             irc.reply("ERROR: No logs found to display.")
         else:
             for (k, v) in ll.items():
-                irc.reply("{0} :: {1}".format(k, v))
+                if s:  # filesize.
+                    irc.reply("{0} :: {1} :: {2}".format(k, self._gS(v),  v))
+                else:  # no size.
+                    irc.reply("{0} :: {1}".format(k, v))
 
-    listlogs = wrap(listlogs)
+    listlogs = wrap(listlogs, [('checkCapability', 'owner'), getopts({'size': ''})])
 
 Class = Logger
 
