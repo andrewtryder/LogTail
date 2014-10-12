@@ -7,6 +7,7 @@
 # libs
 import os
 import re
+import tailer
 # extra supybot libs.
 import supybot.conf as conf
 # supybot libs
@@ -17,15 +18,15 @@ import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
 try:
     from supybot.i18n import PluginInternationalization
-    _ = PluginInternationalization('Logger')
+    _ = PluginInternationalization('LogTail')
 except:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
     _ = lambda x:x
 
 
-class Logger(callbacks.Plugin):
-    """Add the help for "@plugin help Logger" here
+class LogTail(callbacks.Plugin):
+    """Add the help for "@plugin help LogTail" here
     This should describe *how* to use this plugin."""
     threaded = True
 
@@ -85,29 +86,6 @@ class Logger(callbacks.Plugin):
 
     grep = wrap(grep, [('checkCapability', 'owner'), ('somethingWithoutSpaces'), ('text')])
 
-    def _tailf(self, logfile, n):
-        """
-        code via: http://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
-        """
-
-        bs = 1024
-        f = open(logfile)
-        f.seek(-1,2)
-        l = 1-f.read(1).count('\n') # If file doesn't end in \n, count it anyway.
-        B = f.tell()
-        while n >= l and B > 0:
-                block = min(bs, B)
-                B -= block
-                f.seek(B, 0)
-                l += f.read(block).count('\n')
-        f.seek(B, 0)
-        l = min(l,n) # discard first (incomplete) line if l > n
-        lines = f.readlines()[-l:]
-        # sed.
-        lines = [i.replace("\n", '') for i in lines]
-        f.close()
-        return lines
-
     def tail(self, irc, msg, args, optlist, optlog):
         """[--singleline --n=# of lines] <logfile>
         
@@ -131,8 +109,7 @@ class Logger(callbacks.Plugin):
                         irc.reply("Sorry, I need a positive integer here.")
                     else:  # under 50 so lets go.
                         lines = v
-            
-        
+
         # next, grab our list of logs.
         ll = self._listlogs()
         if not ll:
@@ -144,7 +121,7 @@ class Logger(callbacks.Plugin):
                 return
         # we're here if things worked.
         # lets display the last 10 lines.
-        lf = self._tailf(ll[optlog], lines)
+        lf = tailer.tail(open(ll[optlog]), lines)
         # lets display.
         if singleline:
             irc.reply("{0} :: {1}".format(optlog, " ".join([i for i in lf])))
@@ -232,7 +209,7 @@ class Logger(callbacks.Plugin):
 
     listlogs = wrap(listlogs, [('checkCapability', 'owner'), getopts({'size': ''})])
 
-Class = Logger
+Class = LogTail
 
 
 # vim:set shiftwidth=4 softtabstop=4 expandtab textwidth=79:

@@ -9,7 +9,7 @@ import supybot.conf as conf
 import supybot.registry as registry
 try:
     from supybot.i18n import PluginInternationalization
-    _ = PluginInternationalization('Logger')
+    _ = PluginInternationalization('LogTail')
 except:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
@@ -21,12 +21,12 @@ def configure(advanced):
     # user or not.  You should effect your configuration by manipulating the
     # registry as appropriate.
     from supybot.questions import expect, anything, something, yn
-    conf.registerPlugin('Logger', True)
+    conf.registerPlugin('LogTail', True)
 
 
-Logger = conf.registerPlugin('Logger')
+LogTail = conf.registerPlugin('LogTail')
 # This is where your configuration variables (if any) should go.  For example:
-# conf.registerGlobalValue(Logger, 'someConfigVariableName',
+# conf.registerGlobalValue(LogTail, 'someConfigVariableName',
 #     registry.Boolean(False, _("""Help for someConfigVariableName.""")))
 
 

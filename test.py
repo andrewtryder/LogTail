@@ -7,8 +7,8 @@
 
 from supybot.test import *
 
-class LoggerTestCase(PluginTestCase):
-    plugins = ('Logger',)
+class LogTailTestCase(PluginTestCase):
+    plugins = ('LogTail',)
 
 
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:
