@@ -8,6 +8,7 @@
 import os
 import re
 import tailer
+from tbgrep import TracebackGrep
 # extra supybot libs.
 import supybot.conf as conf
 # supybot libs
@@ -30,20 +31,9 @@ class LogTail(callbacks.Plugin):
     This should describe *how* to use this plugin."""
     threaded = True
 
-    def _findexceptions(self, filename):
-        """Grep through filename and return a list of exceptions."""
-
-        filehandle = open(filename).read()  # read in. regex below.
-        exceptions = re.findall('(ERROR.*?Uncaught exception.*?)ERROR', filehandle, re.M|re.S)
-        exceptionlist = []  # list to dump in.
-        # return None if we don't find anything.
-        if not exceptions:
-            return None
-        else:  # each one is appended in to list.
-            for e in exceptions:
-                exceptionlist.append(e)
-            # now return the list.
-            return exceptionlist
+    #############################
+    # INTERNAL HELPER FUNCTIONS #
+    #############################
         
     def _grep(self, pattern, file_obj, ln=False):
         """
@@ -58,78 +48,6 @@ class LogTail(callbacks.Plugin):
                 else:
                     l.append(line.rstrip())
         return l
-
-    def grep(self, irc, msg, args, optlog, optpat):
-        """<log> <pattern>
-        
-        Grep logfile for pattern.
-        """
-        
-        optlog = optlog.lower()
-
-        # next, grab our list of logs.
-        ll = self._listlogs()
-        if not ll:
-            irc.reply("ERROR: No logs found to display.")
-            return
-        else:  # found logs. verify it works.
-            if optlog not in ll:  # we didn't find. display a list.
-                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
-                return
-        # now find.
-        g = self._grep(optpat, ll[optlog], ln=False)
-        # we get a list back.
-        if len(g) == 0:  # no matches.
-            irc.reply("Sorry, I found no matches in the {0} logfile for '{1}'".format(optlog, optpat))
-        else:  # matches.
-            irc.reply(g)
-
-    grep = wrap(grep, [('checkCapability', 'owner'), ('somethingWithoutSpaces'), ('text')])
-
-    def tail(self, irc, msg, args, optlist, optlog):
-        """[--singleline --n=# of lines] <logfile>
-        
-        Tail's the last 10 messages from a logfile. Execute listlogs command for a list of logs available.
-        Ex: main
-        """
-        
-        # first, lower optlog to match.
-        optlog = optlog.lower()
-        
-        # next handle optlist.
-        singleline, lines = False, 10  # defaults.
-        if optlist:
-            for (k, v) in optlist:
-                if k == 'singleline':
-                    singleline = True
-                if k == 'n':
-                    if v > 50:
-                        irc.reply("Sorry, I won't display more than 50 lines.")
-                    elif v < 1:
-                        irc.reply("Sorry, I need a positive integer here.")
-                    else:  # under 50 so lets go.
-                        lines = v
-
-        # next, grab our list of logs.
-        ll = self._listlogs()
-        if not ll:
-            irc.reply("ERROR: No logs found to display.")
-            return
-        else:  # found logs. verify it works.
-            if optlog not in ll:  # we didn't find. display a list.
-                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
-                return
-        # we're here if things worked.
-        # lets display the last 10 lines.
-        lf = tailer.tail(open(ll[optlog]), lines)
-        # lets display.
-        if singleline:
-            irc.reply("{0} :: {1}".format(optlog, " ".join([i for i in lf])))
-        else:  # one per line.
-            for l in lf:
-                irc.reply("{0}".format(l))
-
-    tail = wrap(tail, [('checkCapability', 'owner'), getopts({'singleline': '', 'n':('int') }), ('somethingWithoutSpaces')])
 
     def _listlogs(self):
         """
@@ -184,9 +102,169 @@ class LogTail(callbacks.Plugin):
             num /= 1024.0
         return "%3.1f%s" % (num, 'TB')
 
-    def listlogs(self, irc, msg, args, optlist):
+    ###################
+    # PUBLIC COMMANDS #
+    ###################
+
+    def grep(self, irc, msg, args, optlog, optpat):
+        """<log> <pattern>
+        
+        Grep logfile for pattern.
         """
-        List log files available.
+        
+        optlog = optlog.lower()
+
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+            return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # now find.
+        g = self._grep(optpat, ll[optlog], ln=False)
+        # we get a list back.
+        if len(g) == 0:  # no matches.
+            irc.reply("Sorry, I found no matches in the {0} logfile for '{1}'".format(optlog, optpat))
+        else:  # matches.
+            irc.reply(g)
+
+    grep = wrap(grep, [('checkCapability', 'owner'), ('somethingWithoutSpaces'), ('text')])
+
+    def tbgrep(self, irc, msg, args, optlist, optlog):
+        """[--options] <logfile>
+        
+        Display tracebacks from a specific logfile.
+        """
+
+        # first, lower optlog to match.
+        optlog = optlog.lower()
+        
+        # next handle optlist.
+        lines, showlast = 10, False  # defaults.
+        if optlist:
+            for (k, v) in optlist:
+                if k == 'last':
+                    showlast = True
+                if k == 'n':
+                    if v > 50:
+                        irc.reply("Sorry, I won't display more than 50 lines.")
+                    elif v < 1:
+                        irc.reply("Sorry, I need a positive integer here.")
+                    else:  # under 50 so lets go.
+                        lines = v
+
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+            return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # we're here if things worked.
+        tbo = []
+        # now lets use TracebackGrep.
+        extractor = TracebackGrep()
+        for line in file(ll[optlog]):
+            tb = extractor.process(line)
+            if tb:  # if we find any, add.        
+                tbo.append(tb)
+                #irc.reply(type(tb))
+        # now lets output if we find anything.
+        if len(tbo) == 0:
+            irc.reply("I did not find any Tracebacks in {0}'s logfile.".format(optlog))
+        else:  # found some. how to handle.
+            if showlast:
+                irc.reply("{0}".format(tbo[-1]))
+            else:
+                for each in tbo[-(lines):]:
+                    irc.reply(each)
+            
+    tbgrep = wrap(tbgrep, [('checkCapability', 'owner'), getopts({'last':'', 'n':('int') }), ('somethingWithoutSpaces')])
+
+    def tail(self, irc, msg, args, optlist, optlog):
+        """[--singleline --n=# of lines] <logfile>
+        
+        Tail's the last 10 messages from a logfile. Execute listlogs command for a list of logs available.
+        Ex: main
+        """
+        
+        # first, lower optlog to match.
+        optlog = optlog.lower()
+        
+        # next handle optlist.
+        singleline, lines = False, 10  # defaults.
+        if optlist:
+            for (k, v) in optlist:
+                if k == 'singleline':
+                    singleline = True
+                if k == 'n':
+                    if v > 50:
+                        irc.reply("Sorry, I won't display more than 50 lines.")
+                    elif v < 1:
+                        irc.reply("Sorry, I need a positive integer here.")
+                    else:  # under 50 so lets go.
+                        lines = v
+
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+            return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # we're here if things worked.
+        # lets display the last 10 lines.
+        lf = tailer.tail(open(ll[optlog]), lines)
+        # lets display.
+        if singleline:
+            irc.reply("{0} :: {1}".format(optlog, " ".join([i for i in lf])))
+        else:  # one per line.
+            for l in lf:
+                irc.reply("{0}".format(l))
+
+    tail = wrap(tail, [('checkCapability', 'owner'), getopts({'singleline': '', 'n':('int') }), ('somethingWithoutSpaces')])
+
+    def rmlog(self, irc, msg, args, optlog):
+        """<log>
+        
+        Deletes logfile.
+        """
+
+        # first, lower optlog to match.
+        optlog = optlog.lower()
+
+        # next, grab our list of logs.
+        ll = self._listlogs()
+        if not ll:
+            irc.reply("ERROR: No logs found to display.")
+            return
+        else:  # found logs. verify it works.
+            if optlog not in ll:  # we didn't find. display a list.
+                irc.reply("ERROR: '{0}' is not a valid log. These are: {1}".format(optlog, " | ".join([i for i in ll.keys()])))
+                return
+        # now lets delete the log.
+        fn = ll[optlog]  # filname
+        fs = self._gS(fn)  # filesize.
+        # now lets try to delete.
+        try:
+            os.remove(fn)
+            irc.reply("I have successfully removed {0} ({1})".format(fn, fs))
+        except Exception as e:
+            irc.reply("ERROR trying to delete {0} :: {1}".format(fn, e))
+
+    rmlog = wrap(rmlog, [('checkCapability', 'owner'), ('somethingWithoutSpaces')])
+
+    def listlogs(self, irc, msg, args, optlist):
+        """[--size]
+        
+        List log files available. Use --size to display how big.
         """
         
         # setup input args.
